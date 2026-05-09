@@ -7,7 +7,7 @@ from datapipe import build_dataset, get_dataset
 from Net import MVEEGNet 
 import argparse
 from utils import set_random_seed, create_logger, plot_metric_history, plot_roc_curves
-from evaluation import evaluate, train, trainWithNoise
+from evaluation import evaluate, train
 import time
 
 set_random_seed(42)
