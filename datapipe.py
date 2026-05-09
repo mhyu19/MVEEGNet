@@ -4,14 +4,14 @@ import os
 import numpy as np 
 import torch
 from torch_geometric.data import Data, Batch, InMemoryDataset, HeteroData
-from torch_geometric.utils import dense_to_sparse  # 如果需要生成边
+from torch_geometric.utils import dense_to_sparse 
 from tqdm import tqdm
 import scipy.io as sio
 import glob  
 from sklearn.model_selection import StratifiedKFold, KFold
 
 
-cross_number = 15 # faced数据集受试者数量很多，进行交叉验证
+cross_number = 15 # faced数据集受试者数量多，进行交叉验证
 classes = 4 # Num. of classes 
 
 def to_categorical(y, num_classes=None, dtype='float32'): 
@@ -81,10 +81,6 @@ def normalize(data):
     return data 
 
 def kfold_indices(labels, n_splits=5, stratified=True, shuffle=True, random_state=42):
-    """
-    返回 [(train_idx, test_idx), ...] 列表
-    labels 可以是向量或one-hot矩阵
-    """
     y = np.array(labels)
     if y.ndim > 1:
         y_for_split = np.argmax(y, axis=1)
@@ -185,7 +181,7 @@ def build_dataset(cross_num, data_name, data_path, labels_path, view_num=5):
     print(splits)
     if data_name == 'seed' or data_name == 'seed4':
         for train_index, test_index in splits:
-            path = '/home/mhyu/yuminghao/code/MVEEG2/{}/processed/V_{:.0f}_{:s}_CV{:.0f}_{:.0f}.dataset'.format(
+            path = 'MVEEG2/{}/processed/V_{:.0f}_{:s}_CV{:.0f}_{:.0f}.dataset'.format(
                         data_name, version, 'Train', cross_num, test_index[0])
             print(path)
             print('Building train and test dataset')
@@ -209,11 +205,11 @@ def build_dataset(cross_num, data_name, data_path, labels_path, view_num=5):
             _, testY = np.unique(testY, return_inverse=True)
             testY = to_categorical(testY, classes)
 
-            train_dataset = EmotionDataset('Train', '/home/mhyu/yuminghao/code/MVEEG2/{}/'.format(data_name), cross_num, test_index[0], train_X, Y)
-            test_dataset = EmotionDataset('Test', '/home/mhyu/yuminghao/code/MVEEG2/{}/'.format(data_name), cross_num, test_index[0], test_X, testY)
+            train_dataset = EmotionDataset('Train', 'MVEEG2/{}/'.format(data_name), cross_num, test_index[0], train_X, Y)
+            test_dataset = EmotionDataset('Test', 'MVEEG2/{}/'.format(data_name), cross_num, test_index[0], test_X, testY)
     elif data_name == 'faced':
         for sub_i in range(cross_num):
-            path = '/home/mhyu/yuminghao/code/MVEEG2/{}/processed/V_{:.0f}_{:s}_CV{:.0f}_{:.0f}.dataset'.format(
+            path = '/MVEEG2/{}/processed/V_{:.0f}_{:s}_CV{:.0f}_{:.0f}.dataset'.format(
                     data_name, version, 'Train', cross_num, sub_i)
             print(path)
             train_idx, test_idx = splits[sub_i]
@@ -235,35 +231,25 @@ def build_dataset(cross_num, data_name, data_path, labels_path, view_num=5):
             _, testY = np.unique(testY, return_inverse=True)
             testY = to_categorical(testY, classes)
 
-            train_dataset = EmotionDataset('Train', '/home/mhyu/yuminghao/code/MVEEG2/{}/'.format(data_name), cross_num, sub_i, train_X, Y)
-            test_dataset = EmotionDataset('Test', '/home/mhyu/yuminghao/code/MVEEG2/{}/'.format(data_name), cross_num, sub_i, test_X, testY)
+            train_dataset = EmotionDataset('Train', 'MVEEG2/{}/'.format(data_name), cross_num, sub_i, train_X, Y)
+            test_dataset = EmotionDataset('Test', 'MVEEG2/{}/'.format(data_name), cross_num, sub_i, test_X, testY)
             print('Dataset is built.')
             
 def get_dataset(subjects, sub_i, data_name):
-    path = '/home/mhyu/yuminghao/code/MVEEG2/{}/processed/V_{:.0f}_{:s}_CV{:.0f}_{:.0f}.dataset'.format(
+    path = 'MVEEG2/{}/processed/V_{:.0f}_{:s}_CV{:.0f}_{:.0f}.dataset'.format(
             data_name, version, 'Train', subjects, sub_i)
     print(path)
     if not os.path.exists(path): 
-        _data_path = '/home/mhyu/yuminghao/code/datasets/SEED/ExtractedFeatures/'
-        # _data_path = '/home/mhyu/yuminghao/code/datasets/FACED/EEG_Features/DE/'
-        _labels_path = '/home/mhyu/yuminghao/code/datasets/SEED/ExtractedFeatures/label.mat'
-        # _labels_path = "/home/mhyu/yuminghao/code/datasets/FACED/labels9.mat"
-        # get_data(data_name='seed', data_path=_data_path, labels_path=_labels_path)
         build_dataset(cross_num=15, data_name='seed', data_path=_data_path, labels_path=_labels_path, view_num=5)
         # raise IOError('Train dataset is not exist!')
 
-    train_dataset = EmotionDataset('Train', '/home/mhyu/yuminghao/code/MVEEG2/{}/'.format(data_name), subjects, sub_i)
-    test_dataset = EmotionDataset('Test', '/home/mhyu/yuminghao/code/MVEEG2/{}/'.format(data_name), subjects, sub_i)
+    train_dataset = EmotionDataset('Train', 'MVEEG2/{}/'.format(data_name), subjects, sub_i)
+    test_dataset = EmotionDataset('Test', 'MVEEG2/{}/'.format(data_name), subjects, sub_i)
 
     return train_dataset, test_dataset
 
 if __name__ == '__main__':
-    # _data_path = '/home/mhyu/yuminghao/code/datasets/SEED/ExtractedFeatures/'
-    _data_path = '/home/mhyu/yuminghao/code/datasets/SEEDIV/eeg_feature_smooth/'
-    # _data_path = '/home/mhyu/yuminghao/code/datasets/FACED/EEG_Features/DE/'
-    _labels_path = '/home/mhyu/yuminghao/code/datasets/SEED/ExtractedFeatures/label.mat'
-    _labels_path = '/home/mhyu/yuminghao/code/datasets/SEEDIV/eeg_feature_smooth/'
-    # _labels_path = "/home/mhyu/yuminghao/code/datasets/FACED/labels9.mat"
+
     # get_data(data_name='seed', data_path=_data_path, labels_path=_labels_path)
     build_dataset(cross_num=15, data_name='seed4', data_path=_data_path, labels_path=_labels_path, view_num=5)
     
