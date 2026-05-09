@@ -15,21 +15,15 @@ class IterativeGraphLearner(nn.Module):
         self.epsilon = epsilon
         self.num_heads = num_heads
         
-        # 多头注意力权重
+        # 权重
         self.weight_tensor = nn.Parameter(torch.Tensor(num_heads, hidden_dim))
         nn.init.xavier_uniform_(self.weight_tensor)
-        
-        # 非线性变换
+
         self.linear = nn.Linear(input_dim, hidden_dim)
         self.activation = nn.ReLU()
 
     def forward(self, x):
-        """
-        x: (Batch, N, Dim)
-        返回: adj (Batch, N, N), smoothness_loss
-        """
         B, N, D = x.shape
-        # 变换特征
         x_trans = self.activation(self.linear(x)) # (B, N, Hidden)
         adj_list = []
         for i in range(self.num_heads):
@@ -42,21 +36,16 @@ class IterativeGraphLearner(nn.Module):
         # 平均多头结果
         adj = torch.mean(torch.stack(adj_list), dim=0)
         # 稀疏化
-        # 方式 A: 阈值截断 (Thresholding) -> 去除噪声边
         mask_threshold = (adj > self.epsilon).float()
-        # 方式 B: Top-K
         topk_values, topk_indices = torch.topk(adj, self.k, dim=-1)
         mask_topk = torch.zeros_like(adj)
         mask_topk.scatter_(-1, topk_indices, 1.0)
         final_mask = mask_threshold * mask_topk
-        # 生成加权邻接矩阵 (保留梯度)
-        # 仅对保留的边进行 Softmax
         zero_vec = -9e15 * torch.ones_like(adj)
         adj_masked = torch.where(final_mask > 0, adj, zero_vec)
         adj_final = F.softmax(adj_masked, dim=-1)
-        # 计算图平滑度损失 (Graph Smoothness Loss / Dirichlet Energy)
+        
         # L_smooth = sum_{i,j} A_ij ||x_i - x_j||^2
-        # 计算节点对距离矩阵
         x_norm_for_loss = F.normalize(x, p=2, dim=-1)
         dist_matrix = torch.cdist(x_norm_for_loss, x_norm_for_loss).pow(2) # (B, N, N)
         smoothness_loss = torch.mean(torch.sum(adj_final * dist_matrix, dim=(1, 2)))
@@ -64,14 +53,13 @@ class IterativeGraphLearner(nn.Module):
         return adj_final, smoothness_loss
     
 
-# 图卷积模块
 class TGCN(torch.nn.Module):
     def __init__(self, in_features, bn_features, out_features):
         super().__init__()
-        self.channels = 62  # EEG通道数
-        self.in_features = in_features #65*32
-        self.bn_features = bn_features #64
-        self.out_features = out_features #32
+        self.channels = 62  
+        self.in_features = in_features 
+        self.bn_features = bn_features 
+        self.out_features = out_features 
         self.graph_learner = IterativeGraphLearner(
             input_dim=bn_features,
             hidden_dim=64,
@@ -94,16 +82,13 @@ class TGCN(torch.nn.Module):
         x = F.relu(self.gconv(x, adj_final)) + self.residual(x)
         return x, adj, smooth_loss
 
-
-# 主网络架构
 class MVEEGNet(torch.nn.Module):
     def __init__(self, dim_in, dim_h, d_out, sz_layer, 
                  num_views, channels, num_class):
         super().__init__()
-        # 初始化参数
         self.stride = 2
-        self.sz_layer = sz_layer              # 每个视图的GCN层数
-        self.sc_views = num_views             # 视图数
+        self.sz_layer = sz_layer             
+        self.sc_views = num_views            
         self.gcn_layer = nn.ModuleList(
             self.channal_block(
                 self.stride, dim_in, dim_h, d_out))
@@ -154,6 +139,4 @@ class MVEEGNet(torch.nn.Module):
         out = torch.concat(all_hs, dim=-1)
         flat_features = out.reshape(train_x[0].size(0), -1)
         alpha_a, pred, u_fused = self.fml(all_hs)
-        class_output = self.linend(flat_features)
-        # import pdb; pdb.set_trace()
         return alpha_a, u_fused, pred, total_smooth_loss, all_adjs
