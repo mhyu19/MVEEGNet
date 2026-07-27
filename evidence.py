@@ -3,9 +3,9 @@ import torch
 import torch.nn.functional as F
 
 
-class RCML(nn.Module):
+class FML(nn.Module):
     def __init__(self, num_views, dims, num_classes):
-        super(RCML, self).__init__()
+        super(FML, self).__init__()
         self.num_views = num_views
         self.num_classes = num_classes
         self.EvidenceCollectors = nn.ModuleList(
@@ -21,6 +21,7 @@ class RCML(nn.Module):
         alphas = [e + 1 for e in evidences.values()]
         # 2. 狄利克雷算子融合 (基于均值的证据聚合)
         # 平滑不同视图的极端值
+        
         alpha_fused = torch.zeros_like(alphas[0])
         for a in alphas:
             alpha_fused += a
@@ -34,6 +35,7 @@ class RCML(nn.Module):
         # 4. 计算预测概率 (狄利克雷分布的均值)
         # Prob = alpha / S
         prob_fused = alpha_fused / S_fused
+        # import pdb; pdb.set_trace()
         return evidences, prob_fused, u_fused
 
 
