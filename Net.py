@@ -15,15 +15,21 @@ class IterativeGraphLearner(nn.Module):
         self.epsilon = epsilon
         self.num_heads = num_heads
         
-        # 权重
+        # 多头注意力权重
         self.weight_tensor = nn.Parameter(torch.Tensor(num_heads, hidden_dim))
         nn.init.xavier_uniform_(self.weight_tensor)
-
+        
+        # 非线性变换
         self.linear = nn.Linear(input_dim, hidden_dim)
         self.activation = nn.ReLU()
 
     def forward(self, x):
+        """
+        x: (Batch, N, Dim)
+        返回: adj (Batch, N, N), smoothness_loss
+        """
         B, N, D = x.shape
+        # 变换特征
         x_trans = self.activation(self.linear(x)) # (B, N, Hidden)
         adj_list = []
         for i in range(self.num_heads):
@@ -36,16 +42,21 @@ class IterativeGraphLearner(nn.Module):
         # 平均多头结果
         adj = torch.mean(torch.stack(adj_list), dim=0)
         # 稀疏化
+        # 方式 A: 阈值截断 (Thresholding) -> 去除噪声边
         mask_threshold = (adj > self.epsilon).float()
+        # 方式 B: Top-K
         topk_values, topk_indices = torch.topk(adj, self.k, dim=-1)
         mask_topk = torch.zeros_like(adj)
         mask_topk.scatter_(-1, topk_indices, 1.0)
         final_mask = mask_threshold * mask_topk
+        # 生成加权邻接矩阵 (保留梯度)
+        # 仅对保留的边进行 Softmax
         zero_vec = -9e15 * torch.ones_like(adj)
         adj_masked = torch.where(final_mask > 0, adj, zero_vec)
         adj_final = F.softmax(adj_masked, dim=-1)
-        
+        # 计算图平滑度损失 (Graph Smoothness Loss / Dirichlet Energy)
         # L_smooth = sum_{i,j} A_ij ||x_i - x_j||^2
+        # 计算节点对距离矩阵
         x_norm_for_loss = F.normalize(x, p=2, dim=-1)
         dist_matrix = torch.cdist(x_norm_for_loss, x_norm_for_loss).pow(2) # (B, N, N)
         smoothness_loss = torch.mean(torch.sum(adj_final * dist_matrix, dim=(1, 2)))
@@ -53,18 +64,19 @@ class IterativeGraphLearner(nn.Module):
         return adj_final, smoothness_loss
     
 
+# 图卷积模块
 class TGCN(torch.nn.Module):
-    def __init__(self, in_features, bn_features, out_features):
+    def __init__(self, in_features, bn_features, out_features, topk, epsilon):
         super().__init__()
-        self.channels = 62  
-        self.in_features = in_features 
-        self.bn_features = bn_features 
-        self.out_features = out_features 
+        self.in_features = in_features #65*32
+        self.bn_features = bn_features #64
+        self.out_features = out_features #32
         self.graph_learner = IterativeGraphLearner(
             input_dim=bn_features,
             hidden_dim=64,
             num_heads=4,
-            topk=10
+            topk=topk,
+            epsilon=epsilon
         )
         self.bnlin = Linear(in_features, bn_features) 
         self.gconv = DenseSAGEConv(in_features, out_features)
@@ -82,22 +94,26 @@ class TGCN(torch.nn.Module):
         x = F.relu(self.gconv(x, adj_final)) + self.residual(x)
         return x, adj, smooth_loss
 
+
+# 主网络架构
 class MVEEGNet(torch.nn.Module):
     def __init__(self, dim_in, dim_h, d_out, sz_layer, 
-                 num_views, channels, num_class):
+                 num_views, channels, num_class, topk, epsilon):
         super().__init__()
+        # 初始化参数
         self.stride = 2
-        self.sz_layer = sz_layer             
-        self.sc_views = num_views            
+        self.sz_layer = sz_layer              # 每个视图的GCN层数
+        self.sc_views = num_views             # 视图数
         self.gcn_layer = nn.ModuleList(
             self.channal_block(
-                self.stride, dim_in, dim_h, d_out))
+                self.stride, dim_in, dim_h, d_out, topk, epsilon))
         self.layer_norm = nn.LayerNorm(channels, eps=1e-6)
         self.drop4 = Dropout(0.2)
-        self.fml = FML(num_views, np.array([[channels * d_out] * num_views]).transpose(), num_class)
+        fml_dims = np.array([channels * d_out, channels * d_out, channels * d_out, channels * d_out,channels * d_out ])
+        self.fml = FML(num_views, fml_dims, num_class)
         self.linend = Linear(channels * d_out * num_views, num_class)
 
-    def channal_block(self, stride, d_in, d_h, d_out):
+    def channal_block(self, stride, d_in, d_h, d_out, topk=10, epsilon=0.5):
         layer = []
         for v in range(self.sc_views):
             t_layer = []
@@ -106,12 +122,12 @@ class MVEEGNet(torch.nn.Module):
                     in_feats = int(d_in)
                     bn_feats = int(d_h)
                     out_feats = int(d_h // stride)
-                    t_layer.append(TGCN(in_feats, bn_feats, out_feats))
+                    t_layer.append(TGCN(in_feats, bn_feats, out_feats, topk, epsilon))
                 elif l == self.sz_layer - 1:
                     div = int(stride * 2 * 2)
-                    t_layer.append(TGCN(int(d_h // div), int(d_h // div), int(d_out)))
+                    t_layer.append(TGCN(int(d_h // div), int(d_h // div), int(d_out), topk, epsilon))
                 else:
-                    t_layer.append(TGCN(int(d_h // stride), int(d_h // (stride * 2)), int(d_h // (stride * 2 * 2))))
+                    t_layer.append(TGCN(int(d_h // stride), int(d_h // (stride * 2)), int(d_h // (stride * 2 * 2)), topk, epsilon))
                 # t_layer.append(nn.Dropout(self.drop_rate))   
             layer.append(nn.ModuleList(t_layer))
         return layer
@@ -139,4 +155,83 @@ class MVEEGNet(torch.nn.Module):
         out = torch.concat(all_hs, dim=-1)
         flat_features = out.reshape(train_x[0].size(0), -1)
         alpha_a, pred, u_fused = self.fml(all_hs)
+        class_output = self.linend(flat_features)
+        # import pdb; pdb.set_trace()
+        return alpha_a, u_fused, pred, total_smooth_loss, all_adjs
+    
+
+class MVEEGNet_EYE(torch.nn.Module):
+    def __init__(self, eeg_dim_in,eye_dim_in, dim_h, d_out, sz_layer, 
+                 num_views, channels, num_class):
+        super().__init__()
+        # 初始化参数
+        self.stride = 2
+        self.sz_layer = sz_layer              # 每个视图的GCN层数
+        self.sc_views = num_views             # 视图数
+        self.gcn_layer = nn.ModuleList(
+            self.channal_block(
+                self.stride, eeg_dim_in, dim_h, d_out))
+        self.layer_norm = nn.LayerNorm(channels, eps=1e-6)
+        self.eye_mlp = nn.Sequential(
+            Linear(eye_dim_in, dim_h),
+            nn.ReLU(),
+            Linear(dim_h, d_out)
+        )
+        self.drop4 = Dropout(0.2)
+        fml_dims = np.array([32*62, 32*62, 32*62, 32*62, 32*62, 32*31])
+        self.fml = FML(num_views, fml_dims, num_class)
+        self.linend = Linear((channels * d_out *( num_views-1))+32*31, num_class)
+
+    def channal_block(self, stride, d_in, d_h, d_out):
+        layer = []
+        for v in range(self.sc_views-1):
+            t_layer = []
+            for l in range(self.sz_layer):
+                if l == 0:
+                    in_feats = int(d_in)
+                    bn_feats = int(d_h)
+                    out_feats = int(d_h // stride)
+                    t_layer.append(TGCN(in_feats, bn_feats, out_feats))
+                elif l == self.sz_layer - 1:
+                    div = int(stride * 2 * 2)
+                    t_layer.append(TGCN(int(d_h // div), int(d_h // div), int(d_out)))
+                else:
+                    t_layer.append(TGCN(int(d_h // stride), int(d_h // (stride * 2)), int(d_h // (stride * 2 * 2))))
+                # t_layer.append(nn.Dropout(self.drop_rate))   
+            layer.append(nn.ModuleList(t_layer))
+        return layer
+
+    def forward(self, source_data):
+        train_x = dict()
+        for v in range(self.sc_views-1):
+            node_type = f'view_{v}'
+            x_v = source_data[node_type].x
+            batch_v = source_data[node_type].batch
+            train_x[v], mask_ = to_dense_batch(x_v, batch_v)
+        eye_mode = f'view_{self.sc_views-1}'
+        eye_x = source_data[eye_mode].x
+        eye_batch = source_data[eye_mode].batch
+        eys_features, _ = to_dense_batch(eye_x, eye_batch)
+        # ----------------- 特征提取流程 -----------------
+        all_hs = []
+        all_adjs = []
+        total_smooth_loss = 0.0
+        for i, layer in enumerate(self.gcn_layer):
+            # x_view = x.clone()
+            x_view = train_x[i].clone()
+            # import pdb; pdb.set_trace()
+            for gcn_layer in layer:
+                x_view, adj, layer_loss = gcn_layer(x_view)
+                total_smooth_loss += layer_loss
+            all_hs.append(self.drop4(x_view))
+            all_adjs.append(adj)
+        eye_feature = self.eye_mlp(eys_features)
+        all_hs.append(eye_feature)
+        out = torch.concat(all_hs, dim=1)
+        # import pdb; pdb.set_trace()
+        flat_features = out.reshape(train_x[0].size(0), -1)
+        alpha_a, _, u_fused = self.fml(all_hs)
+        class_output = self.linend(flat_features)
+        pred = F.softmax(class_output, dim=-1)
+        # import pdb; pdb.set_trace()
         return alpha_a, u_fused, pred, total_smooth_loss, all_adjs
