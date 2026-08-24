@@ -47,57 +47,79 @@ def create_logger(dir_path, data_name, model_name, log_file):
     return logger
 
 
-def plot_metric_history(data_df, title, ylabel, save_path, args):
-        plt.figure(figsize=(12, 8))
-        colors = plt.get_cmap('tab20', args.subjects)
-        for i, col in enumerate(data_df.columns):
-            plt.plot(data_df.index + 1, data_df[col], label=col, color=colors(i))
-        plt.xlabel('Epochs')
-        plt.ylabel(ylabel)
-        plt.title(title)
-        plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-        plt.grid(True)
-        plt.tight_layout(rect=[0, 0, 0.85, 1])
-        plt.savefig(save_path)
-        plt.close()
-        print(f"Plot saved to {save_path}")
+def plot_metric_history(data_df, title, ylabel, save_path, subject):
+    plt.figure(figsize=(10, 8))
+    colors = plt.get_cmap('tab20', subject)
+    for i, col in enumerate(data_df.columns):
+        plt.plot(data_df.index + 1, data_df[col], color=colors(i), label=col)
+        
+    plt.xlabel('Epochs', fontsize=14)
+    plt.ylabel(ylabel, fontsize=14)
+    plt.title(title, fontsize=16)
+    
+    # 绘制图例并放置在图表右侧外
+    plt.legend(loc='lower right', fontsize=10) # 考虑到15个受试者，字体稍微调小为10
+    plt.tight_layout()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # 确保保存路径的文件夹存在
+    os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else '.', exist_ok=True)
+    plt.savefig(save_path, dpi=300)
+    plt.show()
+    plt.close()
+    print(f"Plot saved to {save_path}")
 
 
 def plot_roc_curves(y_true, y_score, plot_title, save_path):
-        n_classes = y_true.shape[1]
-        fpr, tpr, roc_auc = dict(), dict(), dict()
-        for i in range(n_classes):
-            fpr[i], tpr[i], _ = roc_curve(y_true[:, i], y_score[:, i])
-            roc_auc[i] = auc(fpr[i], tpr[i])
+    n_classes = y_true.shape[1]
+    fpr, tpr, roc_auc = dict(), dict(), dict()
+    for i in range(n_classes):
+        fpr[i], tpr[i], _ = roc_curve(y_true[:, i], y_score[:, i])
+        roc_auc[i] = auc(fpr[i], tpr[i])
 
-        all_fpr = np.unique(np.concatenate([fpr[i] for i in range(n_classes)]))
-        mean_tpr = np.zeros_like(all_fpr)
-        for i in range(n_classes):
-            mean_tpr += np.interp(all_fpr, fpr[i], tpr[i])
-        mean_tpr /= n_classes
-        fpr["macro"], tpr["macro"] = all_fpr, mean_tpr
-        roc_auc["macro"] = auc(fpr["macro"], tpr["macro"])
+    all_fpr = np.unique(np.concatenate([fpr[i] for i in range(n_classes)]))
+    mean_tpr = np.zeros_like(all_fpr)
+    for i in range(n_classes):
+        mean_tpr += np.interp(all_fpr, fpr[i], tpr[i])
+    mean_tpr /= n_classes
+    fpr["macro"], tpr["macro"] = all_fpr, mean_tpr
+    roc_auc["macro"] = auc(fpr["macro"], tpr["macro"])
 
-        plt.figure(figsize=(10, 8))
-        lw = 2
-        plt.plot(fpr["macro"], tpr["macro"], label=f'Macro-average ROC curve (area = {roc_auc["macro"]:.3f})',
-                 color='navy', linestyle=':', linewidth=4)
-        colors = cycle(['aqua', 'darkorange', 'cornflowerblue'])
-        for i, color in zip(range(n_classes), colors):
-            plt.plot(fpr[i], tpr[i], color=color, lw=lw, label=f'ROC curve of class {i} (area = {roc_auc[i]:.3f})')
+    # 稍微调整了 figsize 比例 (8, 6) 视觉上更紧凑
+    plt.figure(figsize=(8, 6))
+    lw = 2
+    plt.plot(fpr["macro"], tpr["macro"], label=f'Macro-average ROC curve (area = {roc_auc["macro"]:.3f})',
+             color='navy', linestyle=':', linewidth=4)
+             
+    # 修改了颜色列表，使用 tab10 色板，完美支持高达 10 个类别不重复
+    colors = plt.get_cmap('tab10').colors
+    for i, color in zip(range(n_classes), cycle(colors)):
+        plt.plot(fpr[i], tpr[i], color=color, lw=lw, label=f'ROC curve of class {i} (area = {roc_auc[i]:.3f})')
 
-        plt.plot([0, 1], [0, 1], 'k--', lw=lw)
-        plt.xlim([0.0, 1.0])
-        plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title(f'Aggregated ROC - {plot_title}')
-        plt.legend(loc="lower right")
-        plt.grid(True)
-        plt.savefig(save_path)
-        plt.close()
-        print(f"Plot saved to {save_path}")
-
+    plt.plot([0, 1], [0, 1], 'k--', lw=lw)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate', fontsize=12)
+    plt.ylabel('True Positive Rate', fontsize=12)
+    plt.title(f'Aggregated ROC - {plot_title}', fontsize=14)
+    
+    # 缩小图例字体以防遮挡曲线
+    plt.legend(loc="lower right", fontsize=10)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # ================= 核心修改区域 =================
+    # 1. 自动调整子图参数，使之填充整个图像区域
+    plt.tight_layout()
+    
+    os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else '.', exist_ok=True)
+    
+    # 2. 加入 bbox_inches='tight'，在保存时彻底裁切掉多余的白色外边距
+    # pad_inches=0.02 仅保留极小的一圈缓冲，防止刻度数字被切除
+    plt.savefig(save_path, dpi=300, bbox_inches='tight', pad_inches=0.02)
+    # ===============================================
+    
+    plt.close()
+    print(f"Plot saved to {save_path}")
 
 def add_gaussian_noise(source_data, target_view_idx, noise_level):
     """
@@ -118,3 +140,17 @@ def add_gaussian_noise(source_data, target_view_idx, noise_level):
         noisy_data[target_view_name].x = x + noise
         
     return noisy_data
+
+
+# 定义调度器类，用于动态调整训练参数
+class ProgressiveDomainScheduler:
+    def __init__(self, total_epochs, max_mix_domains=3):
+        self.total_epochs = total_epochs  # 总训练轮数
+        self.max_mix_domains = max_mix_domains  # 最大混合域数量（这里为3）
+
+    def get_params(self, epoch):
+        progress = epoch / self.total_epochs
+        mix_ratio = min(1.0, progress)
+        mmd_weight = 0.1
+        domain_weight = 0.1
+        return {'mix_ratio': mix_ratio, 'mmd_weight': mmd_weight, 'domain_weight': domain_weight}
