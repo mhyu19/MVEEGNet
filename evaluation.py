@@ -4,7 +4,8 @@ import numpy as np
 import math
 from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
 from torch_geometric.data import Batch
-from loss import ce_loss
+from loss_fun import get_loss, ce_loss
+from utils import add_gaussian_noise
 
 
 def train(model, train_loader, target_loader, crit, optimizer, epoch, args):
@@ -17,15 +18,15 @@ def train(model, train_loader, target_loader, crit, optimizer, epoch, args):
         optimizer.zero_grad()
 
         label = torch.argmax(source_data.y.view(-1, args.classes), dim=1)  
-        evs, ev_a, smooth_loss = model(source_data)
+        evs, u_fused, ev_a, smooth_loss, _= model(source_data)
 
         multi_loss = 0 
         for v in range(len(evs)):
             multi_loss += ce_loss(label, evs[v], args.classes, epoch, 10, args.device)
         multi_loss += ce_loss(label, ev_a, args.classes, epoch, 10, args.device)
         alpha = 2 / (1 + math.exp(-10 * epoch / 200)) - 1
-        beta = alpha / 100
-        total_loss = multi_loss + beta * smooth_loss
+        # cls_loss = crit(ev_a, label)
+        total_loss = multi_loss + alpha * smooth_loss
 
         total_loss.backward() 
         optimizer.step()  
@@ -54,3 +55,279 @@ def evaluate(model, loader, args):
     f1 = f1_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=1), average='macro')
     acc = accuracy_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=-1))
     return AUC, acc, f1, predictions, labels, u_s
+
+
+def train2(model, train_loader, target_loader, crit, optimizer, epoch, args):
+    model.train()
+    loss_all = 0
+    dynamic_loader = zip(train_loader, target_loader)
+    for _, (source_data, target_data) in enumerate(dynamic_loader):
+        source_data = source_data.to(args.device)
+        target_data = target_data.to(args.device)
+        optimizer.zero_grad()
+
+        label = torch.argmax(source_data.y.view(-1, args.classes), dim=1)  
+        evs, ev_a, smooth_loss = model(source_data)
+
+        # multi_loss = get_loss(evs, ev_a, label, epoch, args.classes, 10, 0.1, args.device)
+        multi_loss = 0 
+        for v in range(len(evs)):
+            multi_loss += ce_loss(label, evs[v], args.classes, epoch, 10, args.device)
+        multi_loss += ce_loss(label, ev_a, args.classes, epoch, 10, args.device)
+        # cls_loss = crit(class_output, label)
+        alpha = 2 / (1 + math.exp(-10 * epoch / 200)) - 1
+        total_loss = multi_loss +  alpha * smooth_loss
+
+        total_loss.backward() 
+        optimizer.step()  
+
+        loss_all += total_loss.item() * source_data.num_graphs
+    return (loss_all / len(train_loader.dataset))
+
+def evaluate2(model, loader, args):
+    model.eval()
+    predictions = []
+    labels = []  
+    with torch.no_grad():
+        for data in loader:
+            label = data.y.view(-1, args.classes)
+            data = data.to(args.device)
+            _, pred ,_ = model(data)
+            predictions.append(pred.cpu().detach().numpy())
+            labels.append(label.numpy())
+    predictions = np.vstack(predictions)
+    labels = np.vstack(labels)
+    AUC = roc_auc_score(labels, predictions, average='macro', multi_class='ovr')
+    f1 = f1_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=1), average='macro')
+    acc = accuracy_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=-1))
+    return AUC, acc, f1, predictions, labels
+
+
+def train3(model, train_loader, target_loader, crit, optimizer, epoch, args):
+    model.train()
+    loss_all = 0
+    dynamic_loader = zip(train_loader, target_loader)
+    for _, (source_data, target_data) in enumerate(dynamic_loader):
+        source_data = source_data.to(args.device)
+        target_data = target_data.to(args.device)
+        optimizer.zero_grad()
+
+        label = torch.argmax(source_data.y.view(-1, args.classes), dim=1)  
+        evs, ev_a, class_output,_ = model(source_data)
+
+        multi_loss = get_loss(evs, ev_a, label, epoch, args.classes, 10, 0.1, args.device)
+        cls_loss = crit(class_output, label)
+        alpha = 2 / (1 + math.exp(-10 * epoch / 200)) - 1
+        beta = alpha / 100
+        total_loss = cls_loss + alpha * multi_loss 
+
+        total_loss.backward() 
+        optimizer.step()  
+
+        loss_all += total_loss.item() * source_data.num_graphs
+    return (loss_all / len(train_loader.dataset))
+
+def evaluate3(model, loader, args):
+    model.eval()
+    predictions = []
+    labels = []  
+    with torch.no_grad():
+        for data in loader:
+            label = data.y.view(-1, args.classes)
+            data = data.to(args.device)
+            _, _, _, pred = model(data)
+            predictions.append(pred.cpu().detach().numpy())
+            labels.append(label.numpy())
+    predictions = np.vstack(predictions)
+    labels = np.vstack(labels)
+    AUC = roc_auc_score(labels, predictions, average='macro', multi_class='ovr')
+    f1 = f1_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=1), average='macro')
+    acc = accuracy_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=-1))
+    return AUC, acc, f1, predictions, labels
+
+
+def train4(model, train_loader, target_loader, crit, optimizer, epoch, args):
+    model.train()
+    loss_all = 0
+    dynamic_loader = zip(train_loader, target_loader)
+    for _, (source_data, target_data) in enumerate(dynamic_loader):
+        source_data = source_data.to(args.device)
+        target_data = target_data.to(args.device)
+        optimizer.zero_grad()
+
+        label = torch.argmax(source_data.y.view(-1, args.classes), dim=1)  
+        class_output, _, smooth_loss = model(source_data)
+
+        # multi_loss = get_loss(evs, ev_a, label, epoch, args.classes, 10, 0.1, args.device)
+        cls_loss = crit(class_output, label)
+        # alpha = 2 / (1 + math.exp(-10 * epoch / 200)) - 1
+        # beta = alpha / 100
+        total_loss = cls_loss + smooth_loss
+
+        total_loss.backward() 
+        optimizer.step()  
+
+        loss_all += total_loss.item() * source_data.num_graphs
+    return (loss_all / len(train_loader.dataset))
+
+def evaluate4(model, loader, args):
+    model.eval()
+    predictions = []
+    labels = []  
+    with torch.no_grad():
+        for data in loader:
+            label = data.y.view(-1, args.classes)
+            data = data.to(args.device)
+            _, pred, _ = model(data)
+            predictions.append(pred.cpu().detach().numpy())
+            labels.append(label.numpy())
+    predictions = np.vstack(predictions)
+    labels = np.vstack(labels)
+    AUC = roc_auc_score(labels, predictions, average='macro', multi_class='ovr')
+    f1 = f1_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=1), average='macro')
+    acc = accuracy_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=-1))
+    return AUC, acc, f1, predictions, labels
+
+
+def trainBase(model, train_loader, target_loader, crit, optimizer, epoch, args):
+    model.train()
+    loss_all = 0
+    dynamic_loader = zip(train_loader, target_loader)
+    for _, (source_data, target_data) in enumerate(dynamic_loader):
+        source_data = source_data.to(args.device)
+        target_data = target_data.to(args.device)
+        optimizer.zero_grad()
+
+        label = torch.argmax(source_data.y.view(-1, args.classes), dim=1)  
+        class_output, _, smooth_loss = model(source_data)
+
+        cls_loss = crit(class_output, label)
+        alpha = 2 / (1 + math.exp(-10 * epoch / 200)) - 1
+        # beta = alpha / 100
+        total_loss = cls_loss + alpha * smooth_loss
+        # total_loss = multi_loss + alpha * smooth_loss
+
+        total_loss.backward() 
+        optimizer.step()  
+
+        loss_all += total_loss.item() * source_data.num_graphs
+    return (loss_all / len(train_loader.dataset))
+
+def evaluateBase(model, loader, args):
+    model.eval()
+    predictions = []
+    labels = []  
+    with torch.no_grad():
+        for data in loader:
+            label = data.y.view(-1, args.classes)
+            data = data.to(args.device)
+            _, pred,_ = model(data)
+            predictions.append(pred.cpu().detach().numpy())
+            labels.append(label.numpy())
+    predictions = np.vstack(predictions)
+    labels = np.vstack(labels)
+    AUC = roc_auc_score(labels, predictions, average='macro', multi_class='ovr')
+    f1 = f1_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=1), average='macro')
+    acc = accuracy_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=-1))
+    return AUC, acc, f1, predictions, labels
+
+
+def trainRCML(model, train_loader, target_loader, crit, optimizer, epoch, args):
+    model.train()
+    loss_all = 0
+    dynamic_loader = zip(train_loader, target_loader)
+    for _, (source_data, target_data) in enumerate(dynamic_loader):
+        source_data = source_data.to(args.device)
+        target_data = target_data.to(args.device)
+        optimizer.zero_grad()
+
+        label = torch.argmax(source_data.y.view(-1, args.classes), dim=1)  
+        evs, ev_a, smooth_loss = model(source_data)
+
+        multi_loss = 0 
+        for v in range(len(evs)):
+            multi_loss += ce_loss(label, evs[v], args.classes, epoch, 10, args.device)
+        multi_loss += ce_loss(label, ev_a, args.classes, epoch, 10, args.device)
+        # multi_loss = get_loss(evs, ev_a, label, epoch, args.classes, 10, 0.1, args.device)
+        # cls_loss = crit(class_output, label)
+        alpha = 2 / (1 + math.exp(-10 * epoch / 200)) - 1
+        beta = alpha / 100
+        # total_loss = cls_loss + alpha * multi_loss + beta * smooth_loss
+        total_loss = multi_loss + beta * smooth_loss
+
+        total_loss.backward() 
+        optimizer.step()  
+
+        loss_all += total_loss.item() * source_data.num_graphs
+    return (loss_all / len(train_loader.dataset))
+
+def evaluateRCML(model, loader, args):
+    model.eval()
+    predictions = []
+    labels = []  
+    u_s = []
+    with torch.no_grad():
+        for data in loader:
+            label = data.y.view(-1, args.classes)
+            data = data.to(args.device)
+            _, pred ,_= model(data)
+            # import pdb; pdb.set_trace()
+            predictions.append(pred.cpu().detach().numpy())
+            labels.append(label.numpy())
+            # u_s.append(u_fused.cpu().detach().numpy())
+    predictions = np.vstack(predictions)
+    labels = np.vstack(labels)
+    AUC = roc_auc_score(labels, predictions, average='macro', multi_class='ovr')
+    f1 = f1_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=1), average='macro')
+    acc = accuracy_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=-1))
+    return AUC, acc, f1, predictions, labels
+
+def trainRCML1(model, train_loader, target_loader, crit, optimizer, epoch, args):
+    model.train()
+    loss_all = 0
+    dynamic_loader = zip(train_loader, target_loader)
+    for _, (source_data, target_data) in enumerate(dynamic_loader):
+        source_data = source_data.to(args.device)
+        target_data = target_data.to(args.device)
+        optimizer.zero_grad()
+
+        label = torch.argmax(source_data.y.view(-1, args.classes), dim=1)  
+        evs, ev_a, smooth_loss = model(source_data)
+
+        # multi_loss = 0 
+        # for v in range(len(evs)):
+        #     multi_loss += ce_loss(label, evs[v], args.classes, epoch, 10, args.device)
+        # multi_loss += ce_loss(label, ev_a, args.classes, epoch, 10, args.device)
+        multi_loss = get_loss(evs, ev_a, label, epoch, args.classes, 10, 0.1, args.device)
+        # cls_loss = crit(class_output, label)
+        alpha = 2 / (1 + math.exp(-10 * epoch / 200)) - 1
+        beta = alpha / 100
+        # total_loss = cls_loss + alpha * multi_loss + beta * smooth_loss
+        total_loss = multi_loss #+ beta * smooth_loss
+
+        total_loss.backward() 
+        optimizer.step()  
+
+        loss_all += total_loss.item() * source_data.num_graphs
+    return (loss_all / len(train_loader.dataset))
+
+def evaluateRCML1(model, loader, args):
+    model.eval()
+    predictions = []
+    labels = []  
+    u_s = []
+    with torch.no_grad():
+        for data in loader:
+            label = data.y.view(-1, args.classes)
+            data = data.to(args.device)
+            _, pred ,_= model(data)
+            # import pdb; pdb.set_trace()
+            predictions.append(pred.cpu().detach().numpy())
+            labels.append(label.numpy())
+            # u_s.append(u_fused.cpu().detach().numpy())
+    predictions = np.vstack(predictions)
+    labels = np.vstack(labels)
+    AUC = roc_auc_score(labels, predictions, average='macro', multi_class='ovr')
+    f1 = f1_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=1), average='macro')
+    acc = accuracy_score(np.argmax(labels, axis=1), np.argmax(predictions, axis=-1))
+    return AUC, acc, f1, predictions, labels
