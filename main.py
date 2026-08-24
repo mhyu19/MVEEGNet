@@ -12,7 +12,7 @@ from evaluation import evaluate, train
 import time
 from plot import plot_accuracy_rejection_curve, plot_uncertainty_distribution
 
-set_random_seed(42)
+set_random_seed(2026)
 
 
 def main(args):
@@ -218,7 +218,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_views', type=int, default=5, help='number of views')
     parser.add_argument('--topk', type=int, default=10, help='topk for TGCN')
     parser.add_argument('--epsilon', type=float, default=0.5, help='epsilon for TGCN')
-    parser.add_argument('--seed', type=int, default=42, help='random seed for reproducibility')
+    parser.add_argument('--seed', type=int, default=2026, help='random seed for reproducibility')
     args = parser.parse_args()
     setup_seed(args.seed)
     args.result_dir = os.path.join(args.result_dir, args.dataset)
